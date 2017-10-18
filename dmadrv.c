@@ -80,7 +80,7 @@ static int __init dmadrv_init(void)
     // memory model check
     msg(KERN_ERR, "phys_addr=0x%016lx\n", pa);
     void *vaddr = phys_to_virt(pa);
-    msg(KERN_ERR, "virt_addr=0x%p\n", vaddr);
+    msg(KERN_ERR, "virt_addr(0x%016lx)=0x%p\n", pa, vaddr);
     int is_valid = virt_addr_valid(vaddr);
     msg(KERN_ERR, "virt_addr_valid(0x%p)=%d\n", vaddr, is_valid); 
     phys_addr_t paddr = virt_to_phys(vaddr);
