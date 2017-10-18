@@ -127,12 +127,13 @@ static int __init dmadrv_init(void)
     msg(KERN_INFO, "struct pci_dev*=%p devfn=%u vendor=%04x device=%04x dma_mask=%016llx\n", 
         dev, dev->devfn, dev->vendor, dev->device, dev->dma_mask);
 
+    // test for pci_map_single
     {
         int ret = 0;
         dma_addr_t dma_handle = 0;
-        msg(KERN_INFO, "calling pci_map_single addr=%p size=%zu\n", addr, size);
-        dma_handle = pci_map_single(dev, addr, size, direction);
-        if (pci_dma_mapping_error(dev, dma_handle)) {
+        msg(KERN_INFO, "calling pci_map_single vaddr=%p size=%zu\n", vaddr, size);
+        dma_handle = pci_map_single(dev, vaddr, size, direction);
+        if ((ret = pci_dma_mapping_error(dev, dma_handle))) {
             msg(KERN_ERR, "error %d in pci_map_single\n", ret);
             result = -EINVAL;
             goto out;
@@ -142,6 +143,7 @@ static int __init dmadrv_init(void)
         pci_unmap_single(dev, dma_handle, size, direction);
     }
 
+    // test for pci_map_sg
     {
         size_t npages = size / PAGE_SIZE;
         struct sg_table sg_tbl;
@@ -189,6 +191,26 @@ static int __init dmadrv_init(void)
     free_sg:
         sg_free_table(sg_head);
     }
+
+#if 0
+    // test for dma_map_resource
+    //   this case triggers BUG_ON(pfn_valid(PHYS_PFN(phys_addr))) in dma_map_resource
+    {
+        int ret = 0;
+        dma_addr_t dma_handle = 0;
+        int attrs = 0;
+        msg(KERN_INFO, "calling dma_map_resource paddr=0x%lx size=%zu\n", pa, size);
+        dma_handle = dma_map_resource(&dev->dev, pa, size, DMA_BIDIRECTIONAL, attrs);
+        if ((ret = dma_mapping_error(&dev->dev, dma_handle))) {
+            msg(KERN_ERR, "error %d in dma_map_resource\n", ret);
+            result = -EINVAL;
+            goto out;
+        }
+        msg(KERN_INFO, "got dma_handle=%llx", dma_handle);
+        msg(KERN_INFO, "unmapping dma handle\n");
+        dma_unmap_resource(&dev->dev, dma_handle, size, direction, attrs);
+    }
+#endif
 
  out:
     if (dev) {
