@@ -91,7 +91,31 @@ static int __init dmadrv_init(void)
     msg(KERN_ERR, "PHYS_PFN(0x%016lx)=0x%lx\n", pa, pfn);
     page = pfn_to_page(pfn);
     msg(KERN_ERR, "pfn_to_page(0x%lx)=0x%p\n", pfn, page);
+    
+    {
+        u64 *up = (u64*)vaddr;
+        msg(KERN_ERR, "accessing 64bits at %p\n", vaddr);
+        udelay(100);
+        u64 u = *up;
+        msg(KERN_ERR, "[%p]=0x%016llx\n", vaddr, u);
+    }
 
+    do {
+        void *vaddr = kmalloc(1024, GFP_KERNEL);
+        if (!addr) {
+            msg(KERN_ERR, "failure in kmalloc(1024)\n");
+            break;
+        }
+        msg(KERN_ERR, "kmalloc(1024)=0x%p\n", vaddr); 
+        int is_valid = virt_addr_valid(vaddr);
+        msg(KERN_ERR, "virt_addr_valid(0x%p)=%d\n", vaddr, is_valid); 
+        phys_addr_t paddr = virt_to_phys(vaddr);
+        msg(KERN_ERR, "virt_to_phys(0x%p)=0x%016llx\n", vaddr, paddr);
+        struct page *page = virt_to_page(vaddr);
+        msg(KERN_ERR, "virt_to_page(0x%p)=0x%p\n", vaddr, page);
+
+        kfree(vaddr);
+    } while(0);
 
     msg(KERN_INFO, "seaching for Mellanox ConnectX-4 PCIe device: venid=%04x devid=%04x\n", venid, devid);
     dev = pci_get_device(venid, devid, from);
