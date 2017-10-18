@@ -43,7 +43,7 @@ MODULE_PARM_DESC(venid, "PCI vendor id");
 module_param(devid, int, 0);
 MODULE_PARM_DESC(devid, "PCI device id");
 
-#define DEVNAME "sgdrv"
+#define DEVNAME "dmadrv"
 
 #ifdef msg
 #undef msg
@@ -51,8 +51,6 @@ MODULE_PARM_DESC(devid, "PCI device id");
 #define msg(KRNLVL, FMT, ARGS...) printk(KRNLVL DEVNAME ":" FMT, ## ARGS)
 
 //-----------------------------------------------------------------------------
-
-static int gdrdrv_major = 0;
 
 struct file_operations gdrdrv_fops = {
     .owner    = THIS_MODULE,
@@ -69,7 +67,7 @@ struct file_operations gdrdrv_fops = {
 
 //-----------------------------------------------------------------------------
 
-static int __init sgdrv_init(void)
+static int __init dmadrv_init(void)
 {
     int result = 0;
     void *addr = (void*)pa;
@@ -77,27 +75,32 @@ static int __init sgdrv_init(void)
     int direction = PCI_DMA_BIDIRECTIONAL;
     struct pci_dev *dev = NULL, *from = NULL;
 
-#if 0
-    result = register_chrdev(gdrdrv_major, DEVNAME, &gdrdrv_fops);
-    if (result < 0) {
-        msg(KERN_ERR, "can't get major %d\n", gdrdrv_major);
-        return result;
-    }
-    if (gdrdrv_major == 0) gdrdrv_major = result; /* dynamic */
+    msg(KERN_ERR, "initializing driver, dbg traces %s\n", dbg_enabled ? "enabled" : "disabled");
 
-    msg(KERN_INFO, "device registered with major number %d\n", gdrdrv_major);
-#endif
+    // memory model check
+    msg(KERN_ERR, "phys_addr=0x%016lx\n", pa);
+    void *vaddr = phys_to_virt(pa);
+    msg(KERN_ERR, "virt_addr=0x%p\n", vaddr);
+    int is_valid = virt_addr_valid(vaddr);
+    msg(KERN_ERR, "virt_addr_valid(0x%p)=%d\n", vaddr, is_valid); 
+    phys_addr_t paddr = virt_to_phys(vaddr);
+    msg(KERN_ERR, "virt_to_phys(0x%p)=0x%016llx\n", vaddr, paddr);
+    struct page *page = virt_to_page(vaddr);
+    msg(KERN_ERR, "virt_to_page(0x%p)=0x%p\n", vaddr, page);
+    unsigned long pfn = PHYS_PFN(pa);
+    msg(KERN_ERR, "PHYS_PFN(0x%016lx)=0x%lx\n", pa, pfn);
+    page = pfn_to_page(pfn);
+    msg(KERN_ERR, "pfn_to_page(0x%lx)=0x%p\n", pfn, page);
 
-    msg(KERN_ERR, "initializing driver, dbg traces %s, pa=%p\n", dbg_enabled ? "enabled" : "disabled", (void*)pa);
 
-    msg(KERN_INFO, "seaching for venid=%04x devid=%04x\n", venid, devid);
+    msg(KERN_INFO, "seaching for Mellanox ConnectX-4 PCIe device: venid=%04x devid=%04x\n", venid, devid);
     dev = pci_get_device(venid, devid, from);
     if (!dev) {
         msg(KERN_ERR, "device not found\n");
         result = -ENODEV;
         goto out;
     }
-    msg(KERN_INFO, "pci_dev*=%p defn=%u vendor=%04x device=%04x dma_mask=%016llx\n", 
+    msg(KERN_INFO, "struct pci_dev*=%p devfn=%u vendor=%04x device=%04x dma_mask=%016llx\n", 
         dev, dev->devfn, dev->vendor, dev->device, dev->dma_mask);
 
     {
@@ -116,15 +119,14 @@ static int __init sgdrv_init(void)
     }
 
     {
-        size_t psz = PAGE_SIZE;
-        size_t npages = size / psz;
+        size_t npages = size / PAGE_SIZE;
         struct sg_table sg_tbl;
         struct sg_table *sg_head = &sg_tbl;
         int nmap = 0;
         int i;
         int ret;
         struct scatterlist *sg = NULL;
-        msg(KERN_INFO, "npages=%zu PAGE_SIZE=%lu but using psz=%zu\n", npages, PAGE_SIZE, psz);
+        msg(KERN_INFO, "npages=%zu PAGE_SIZE=%lu but using PAGE_SIZE=%zu\n", npages, PAGE_SIZE, PAGE_SIZE);
 #ifdef CONFIG_NEED_SG_DMA_LENGTH
         msg(KERN_INFO, "CONFIG_NEED_SG_DMA_LENGTH defined\n");
 #endif
@@ -135,9 +137,16 @@ static int __init sgdrv_init(void)
 			goto out;
 		}
 
+        phys_addr_t aligned_addr = pa & PAGE_MASK;
+        unsigned long offset = pa & (PAGE_SIZE-1);
+        msg(KERN_INFO, "aligned addr=0x%llx offset=%lu\n", aligned_addr, offset);
         for_each_sg(sg_head->sgl, sg, npages, i) {
-	        sg_set_page(sg, addr + i*psz, psz, 0);
-            msg(KERN_INFO, "sg[%d]=%p size=%zu\n", i, addr + i*psz, psz);
+            phys_addr_t page_addr = aligned_addr + i*PAGE_SIZE;
+            unsigned long pfn = PHYS_PFN(page_addr);
+            struct page *page = pfn_to_page(pfn);
+            sg_set_page(sg, page, PAGE_SIZE, offset);
+            msg(KERN_INFO, "sg[%d]=0x%llx offset=%lu page=%p size=%zu\n", i, page_addr, offset, page, PAGE_SIZE);
+            offset = 0;
         }
         msg(KERN_INFO, "calling pci_map_sg npages=%zu\n", npages);
         nmap = pci_map_sg(dev, sg_head->sgl, npages, direction);
@@ -169,7 +178,7 @@ static int __init sgdrv_init(void)
 
 //-----------------------------------------------------------------------------
 
-static void __exit sgdrv_cleanup(void)
+static void __exit dmadrv_cleanup(void)
 {
     msg(KERN_INFO, "cleaning up driver\n");
 
@@ -177,8 +186,8 @@ static void __exit sgdrv_cleanup(void)
 
 //-----------------------------------------------------------------------------
 
-module_init(sgdrv_init);
-module_exit(sgdrv_cleanup);
+module_init(dmadrv_init);
+module_exit(dmadrv_cleanup);
 
 /*
  * Local variables:
