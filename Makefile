@@ -1,6 +1,7 @@
 ifneq ($(KERNELRELEASE),)
 
-obj-m += dmadrv.o enable_relaxed_order.o
+obj-m += dmatest.o 
+dmatest-y += dmadrv.o enable_relaxed_order.o
 
 else
 

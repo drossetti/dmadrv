@@ -48,7 +48,10 @@ MODULE_PARM_DESC(devid, "PCI device id");
 #ifdef msg
 #undef msg
 #endif
-#define msg(KRNLVL, FMT, ARGS...) printk(KRNLVL DEVNAME ":" FMT, ## ARGS)
+#define msg(KRNLVL, FMT, ARGS...) printk(KRNLVL DEVNAME ":" "%s:%d - " FMT, __FUNCTION__, __LINE__,  ## ARGS)
+
+void enable_relaxed(void);
+void disable_relaxed(void);
 
 //-----------------------------------------------------------------------------
 
@@ -70,6 +73,8 @@ struct file_operations gdrdrv_fops = {
 static int __init dmadrv_init(void)
 {
     int result = 0;
+
+#if 0
     void *addr = (void*)pa;
     size_t size = 1024*64*2;
     int direction = PCI_DMA_BIDIRECTIONAL;
@@ -217,6 +222,9 @@ static int __init dmadrv_init(void)
         msg(KERN_INFO, "deref pci dev\n");
         pci_dev_put(dev);
     }
+#endif
+
+    enable_relaxed();
 
     msg(KERN_ERR, "returning result=%d\n", result);
     return result;
@@ -228,6 +236,7 @@ static void __exit dmadrv_cleanup(void)
 {
     msg(KERN_INFO, "cleaning up driver\n");
 
+    disable_relaxed();
 }
 
 //-----------------------------------------------------------------------------

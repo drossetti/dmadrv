@@ -1,5 +1,12 @@
 #if defined(__powerpc__)
 
+#include <linux/version.h>
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/slab.h>
+#include <linux/types.h>
+#include <linux/delay.h>
+#include <linux/compiler.h>
 #include <asm/opal.h>
 
 #define CHIP_COUNT  2
@@ -17,29 +24,34 @@ unsigned int chip_vals[CHIP_COUNT] = {0,8};
 #define ROCONFIG1VAL (0xC801F03FC901F03Ful)
 #define ROCONFIG2VAL (0xFC00000400000000ul)
 
-static uint32_t old_regs[CHIP_COUNT][NPU_STACK_COUNT][NPU_NTL_COUNT][NPU_CONFIG_COUNT];
+static int is_enabled = 0;
+static __be64 old_regs[CHIP_COUNT][NPU_STACK_COUNT][NPU_NTL_COUNT][NPU_CONFIG_COUNT];
 
-#define SCOM_WRITE(CHID,REGBASE,STKID,NTLID,VAL32) do {                 \
-                int rc;                                                 \
-                rc = opal_xscom_write(chip_vals[CHID], REGBASE|(STKID*NPU_STACK_FACTOR)|(NTLID*NPU_NTL_FACTOR), VAL32); \
-                if(rc) {                                                \
-                        printk("scom write error chip:%d reg:%lx rc:%d\n", \
-                               chip_vals[chip_indx],                    \
+#define SCOM_WRITE(CHID,REGBASE,STKID,NTLID,VAL64) do {                 \
+                int64_t rc;                                             \
+                rc = opal_xscom_write(chip_vals[CHID], REGBASE|(STKID*NPU_STACK_FACTOR)|(NTLID*NPU_NTL_FACTOR), VAL64); \
+                if (rc) {                                                \
+                        printk("scom write error chip:%d reg:%lx rc:%lld\n", \
+                               chip_vals[CHID],                    \
                                REGBASE|(STKID*NPU_STACK_FACTOR)|(NTLID*NPU_NTL_FACTOR), \
                                rc);                                     \
+			err = 1;					\
+			goto out;					\
                 }                                                       \
-        }
+  } while(0)
 
-#define SCOM_READ(CHID,REGBASE,STKID,NTLID,PVAR32) do {                 \
-                int rc;                                                 \
-                rc = opal_xscom_read(chip_vals[CHID], REGBASE|(STKID*NPU_STACK_FACTOR)|(NTLID*NPU_NTL_FACTOR), PVAR32); \
-                if(rc) {                                                \
-                        printk("scom read error chip:%d reg:%lx rc:%d\n", \
-                               chip_vals[chip_indx],                    \
+#define SCOM_READ(CHID,REGBASE,STKID,NTLID,PVAR64) do {                 \
+                int64_t rc;                                                 \
+                rc = opal_xscom_read(chip_vals[CHID], REGBASE|(STKID*NPU_STACK_FACTOR)|(NTLID*NPU_NTL_FACTOR), PVAR64); \
+                if (rc) {                                                \
+                        printk("scom read error chip:%d reg:%lx rc:%lld\n", \
+                               chip_vals[CHID],                    \
                                REGBASE|(STKID*NPU_STACK_FACTOR)|(NTLID*NPU_NTL_FACTOR), \
                                rc);                                     \
+			err = 1;					\
+			goto out;					\
                 }                                                       \
-        }
+  } while(0)
 
 /*
  * UPDATE relaxed order config 0 and 1 register. When set to the config vals above, enable relaxed ordering from all PECs
@@ -48,7 +60,35 @@ static uint32_t old_regs[CHIP_COUNT][NPU_STACK_COUNT][NPU_NTL_COUNT][NPU_CONFIG_
  */
 void enable_relaxed(void)
 {
-        int rc, chip_indx, stck_indx,ntl_indx;
+#if 1
+  int rc, rc1, chip_indx, stck_indx,ntl_indx;
+  unsigned long beval,leval;
+
+  beval=0;
+
+  for (chip_indx=0;chip_indx<CHIP_COUNT;chip_indx++) {
+    for(stck_indx=0;stck_indx<NPU_STACK_COUNT;stck_indx++) {
+      for(ntl_indx=0;ntl_indx<NPU_NTL_COUNT;ntl_indx++) {
+	rc = opal_xscom_write(chip_vals[chip_indx],
+			      SCOM_RO_CONFIG0_BASE|(stck_indx*NPU_STACK_FACTOR)|(ntl_indx*NPU_NTL_FACTOR), ROCONFIG0VAL);
+	rc1 = opal_xscom_write(chip_vals[chip_indx],
+			       SCOM_RO_CONFIG1_BASE|(stck_indx*NPU_STACK_FACTOR)|(ntl_indx*NPU_NTL_FACTOR), ROCONFIG1VAL);
+
+	if( rc || rc1)
+	  printk("scom write error chip %d reg %lx %lx rc %d %d\n",
+		 chip_vals[chip_indx],
+		 SCOM_RO_CONFIG0_BASE|(stck_indx*NPU_STACK_FACTOR)|(ntl_indx*NPU_NTL_FACTOR),
+		 SCOM_RO_CONFIG1_BASE|(stck_indx*NPU_STACK_FACTOR)|(ntl_indx*NPU_NTL_FACTOR),
+		 rc, rc1);
+	opal_xscom_write(chip_vals[chip_indx],
+			 SCOM_RO_CONFIG2_BASE|(stck_indx*NPU_STACK_FACTOR)|(ntl_indx*NPU_NTL_FACTOR),ROCONFIG2VAL);
+      }
+    }
+  }
+#else
+
+        int chip_indx, stck_indx,ntl_indx;
+	int err = 0;
 
         for (chip_indx=0;chip_indx<CHIP_COUNT;chip_indx++) {
                 for(stck_indx=0;stck_indx<NPU_STACK_COUNT;stck_indx++) {
@@ -64,12 +104,20 @@ void enable_relaxed(void)
                         }
                 }
         }
-
+ out:
+	if (!err)
+	  is_enabled = 1;
+#endif
 }
 
 void disable_relaxed(void)
 {
-        int rc, chip_indx, stck_indx,ntl_indx;
+#if 0
+        int chip_indx, stck_indx,ntl_indx;
+	int err = 0;
+
+	if (!is_enabled)
+	        return;
 
         for (chip_indx=0;chip_indx<CHIP_COUNT;chip_indx++) {
                 for(stck_indx=0;stck_indx<NPU_STACK_COUNT;stck_indx++) {
@@ -82,6 +130,9 @@ void disable_relaxed(void)
                 }
         }
 
+ out:
+	return;
+#endif
 }
 
 #else
